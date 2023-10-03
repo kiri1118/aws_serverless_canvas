@@ -1,0 +1,456 @@
+Resources:
+    htmlBucket:
+        Type: AWS::S3::Bucket
+        Properties:
+          AccessControl: Private
+          BucketName: a3group69
+    BucketPolicy:
+      Type: AWS::S3::BucketPolicy
+      Properties:
+        Bucket: a3group69
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Principal:
+                AWS: '*'
+              Action: 's3:GetObject'
+              Resource: arn:aws:s3:::a3group69/*
+
+    canvasData:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        AttributeDefinitions:
+          - AttributeName: "coord"
+            AttributeType: "S"
+        BillingMode: PAY_PER_REQUEST
+        KeySchema:
+          - AttributeName: "coord"
+            KeyType: "HASH"
+        PointInTimeRecoverySpecification:
+          PointInTimeRecoveryEnabled: true
+        TableName: canvas-data
+        StreamSpecification:
+          StreamViewType: NEW_IMAGE
+    connectionId:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        AttributeDefinitions:
+          - AttributeName: "id"
+            AttributeType: "S"
+        BillingMode: PAY_PER_REQUEST
+        KeySchema:
+          - AttributeName: "id"
+            KeyType: "HASH"
+        PointInTimeRecoverySpecification:
+          PointInTimeRecoveryEnabled: true
+        TableName: connectionsId
+    timeoutIps:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        AttributeDefinitions:
+          - AttributeName: "ip"
+            AttributeType: "S"
+        BillingMode: PAY_PER_REQUEST
+        KeySchema:
+          - AttributeName: "ip"
+            KeyType: "HASH"
+        PointInTimeRecoverySpecification:
+          PointInTimeRecoveryEnabled: true
+        TableName: timeoutIps
+        TimeToLiveSpecification:
+          AttributeName: TTL
+          Enabled: true
+  
+    canvasLiveUpdatesSocket:
+      Type: AWS::ApiGatewayV2::Api
+      Properties:
+        Description: "This web socket is used for communicating live canvas updates."
+        Name: canvasLiveUpdatesSocket
+        ProtocolType: "WEBSOCKET"
+        RouteSelectionExpression: $request.body.action
+
+    ApiGwAccountConfig:
+      Type: "AWS::ApiGateway::Account"
+      Properties:
+        CloudWatchRoleArn: !GetAtt "ApiGatewayLoggingRole.Arn"
+    ApiGatewayLoggingRole:
+      Type: "AWS::IAM::Role"
+      Properties:
+        AssumeRolePolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Principal:
+                Service:
+                  - "apigateway.amazonaws.com"
+              Action: "sts:AssumeRole"
+        Path: "/"
+        ManagedPolicyArns:
+          - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs"
+
+    ConnectRoute:
+      Type: AWS::ApiGatewayV2::Route
+      Properties:
+        ApiId: !Ref canvasLiveUpdatesSocket
+        RouteKey: $connect
+        AuthorizationType: NONE
+        ApiKeyRequired: false
+        OperationName: ConnectRoute
+        Target: !Join
+          - '/'
+          - - 'integrations'
+            - !Ref ConnectInteg
+    ConnectInteg:
+      Type: AWS::ApiGatewayV2::Integration
+      Properties:
+        ApiId: !Ref canvasLiveUpdatesSocket
+        Description: Connect Integration
+        IntegrationType: AWS_PROXY
+        IntegrationUri: !Join
+          - ''
+          - - 'arn:'
+            - !Ref 'AWS::Partition'
+            - ':apigateway:'
+            - !Ref 'AWS::Region'
+            - ':lambda:path/2015-03-31/functions/'
+            - !GetAtt ConnectPage.Arn
+            - /invocations
+        PassthroughBehavior: 'WHEN_NO_MATCH'
+
+    DisconnectRoute:
+      Type: AWS::ApiGatewayV2::Route
+      Properties:
+        ApiId: !Ref canvasLiveUpdatesSocket
+        RouteKey: $disconnect
+        AuthorizationType: NONE
+        ApiKeyRequired: false
+        OperationName: DisconnectRoute
+        Target: !Join
+          - '/'
+          - - 'integrations'
+            - !Ref DisconnectInteg
+    DisconnectInteg:
+      Type: AWS::ApiGatewayV2::Integration
+      Properties:
+        ApiId: !Ref canvasLiveUpdatesSocket
+        Description: Disconnect Integration
+        IntegrationType: AWS_PROXY
+        IntegrationUri: !Join
+          - ''
+          - - 'arn:'
+            - !Ref 'AWS::Partition'
+            - ':apigateway:'
+            - !Ref 'AWS::Region'
+            - ':lambda:path/2015-03-31/functions/'
+            - !GetAtt DisconnectPage.Arn
+            - /invocations
+        PassthroughBehavior: 'WHEN_NO_MATCH'
+
+    DrawPixelRoute:
+      Type: AWS::ApiGatewayV2::Route
+      Properties:
+        ApiId: !Ref canvasLiveUpdatesSocket
+        RouteKey: drawPixel
+        AuthorizationType: NONE
+        ApiKeyRequired: false
+        OperationName: DrawPixelRoute
+        Target: !Join
+          - '/'
+          - - 'integrations'
+            - !Ref DrawPixelInteg
+    DrawPixelInteg:
+      Type: AWS::ApiGatewayV2::Integration
+      Properties:
+        ApiId: !Ref canvasLiveUpdatesSocket
+        Description: Draw Pixel Integration
+        IntegrationType: AWS_PROXY
+        IntegrationUri: !Join
+          - ''
+          - - 'arn:'
+            - !Ref 'AWS::Partition'
+            - ':apigateway:'
+            - !Ref 'AWS::Region'
+            - ':lambda:path/2015-03-31/functions/'
+            - !GetAtt DrawPixel.Arn
+            - /invocations
+        PassthroughBehavior: 'WHEN_NO_MATCH'
+
+    Deployment:
+      Type: AWS::ApiGatewayV2::Deployment
+      DependsOn:
+      - ConnectRoute
+      - DisconnectRoute
+      - DrawPixelRoute
+      Properties:
+        ApiId: !Ref canvasLiveUpdatesSocket
+    Stage:
+      Type: AWS::ApiGatewayV2::Stage
+      Properties:
+        StageName: LATEST
+        DeploymentId: !Ref Deployment
+        ApiId: !Ref canvasLiveUpdatesSocket
+        DefaultRouteSettings:
+          DetailedMetricsEnabled: true
+          LoggingLevel: INFO
+
+    LambdaFunctionRole:
+      Type: AWS::IAM::Role
+      DeletionPolicy: Delete
+      Properties:
+        AssumeRolePolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+              - lambda.amazonaws.com
+            Action:
+            - sts:AssumeRole
+        Path: "/"
+        Policies:
+          - PolicyName: FullDBAccess
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+              - Effect: Allow
+                Action:
+                - logs:CreateLogGroup
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                - dynamodb:*
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                - execute-api:Invoke
+                - execute-api:ManageConnections
+                Resource: "arn:aws:execute-api:*:*:*"
+              - Effect: Allow
+                Action:
+                - s3:*
+                Resource: "*"
+    DrawPixel:
+      Type: "AWS::Lambda::Function"
+      DeletionPolicy: Delete
+      Properties:
+        FunctionName: "DrawPixel"
+        Environment:
+          Variables:
+            endPointUrl: !Join
+              - ''
+              - - 'https://'
+                - !GetAtt "canvasLiveUpdatesSocket.ApiId"
+                - '.execute-api.'
+                - !Ref "AWS::Region"
+                - '.amazonaws.com/LATEST'
+        Code:
+          ZipFile: |
+            import json
+            import boto3
+            import os
+            import time   
+
+            client = boto3.client('apigatewaymanagementapi', endpoint_url=os.environ.get('endPointUrl'))
+            dynamodb = boto3.client('dynamodb')
+            dynamodbr = boto3.resource('dynamodb')
+            def lambda_handler(event, context):
+                connectionId = event["requestContext"]["connectionId"]
+                
+                e = json.loads(event["body"])
+                
+                item = {
+                    'coord':{
+                        'S' : str(e["x"] ) + "," + str(e["y"])
+                    },
+                    'r':{
+                        'N' : str(e["r"])
+                    },
+                    'g':{
+                        'N' : str(e["g"])
+                    },
+                    'b':{
+                        'N' : str(e["b"])
+                    }
+                }
+                
+                connectionIp = event["requestContext"]["identity"]["sourceIp"]
+                connectionIpJson= {
+                    'ip': {
+                        'S': connectionIp
+                    }
+                }
+                    
+                dynamodb.put_item(TableName='canvas-data', Item=item)
+                
+                
+                connectionIdJson = Key={
+                    'id': connectionId
+                }
+                
+                dynamodb.update_item(TableName='timeoutIps',  Key={
+                    'ip': {'S' : connectionIp }
+                },
+                AttributeUpdates={
+                    'time': {'Value' : {'N' : str(int(time.time()))}}
+                })
+                
+                
+                table = dynamodbr.Table('connectionsId')
+                response = table.scan()
+                data = response['Items']
+                
+                for ipDict in data:
+                    try:
+                        client.post_to_connection(ConnectionId=ipDict['id'], Data=json.dumps(event["body"]).encode('utf-8'))
+                    except:
+                        print("connection error to: "+ ipDict['id'])
+                        table.delete_item(
+                            Key={
+                                'id': ipDict['id']
+                            }
+                )
+
+                return {'statusCode': 200}
+
+        Handler: "index.lambda_handler"
+        Runtime: "python3.8"
+        Timeout: "5"
+        Role: !GetAtt LambdaFunctionRole.Arn
+    DynamoToS3:
+      Type: "AWS::Lambda::Function"
+      DeletionPolicy: Delete
+      Properties:
+        FunctionName: "DynamoToS3"
+        Code:
+          ZipFile: |
+            import json
+            import boto3
+            import zlib
+            import base64
+
+            s3 = boto3.client('s3')
+            dynamodbr = boto3.resource('dynamodb')
+            def lambda_handler(event, context):
+                
+                table = dynamodbr.Table('canvas-data')
+                response = table.scan()
+                data = response['Items']
+                
+                fileData = '{'
+
+                for coordDict in data:
+                    if fileData == '{':
+                        fileData += "\""+coordDict['coord']+"\":{\"r\":"+str(coordDict['r'])+",\"g\":"+str(coordDict['g'])+",\"b\":"+str(coordDict['b'])+"}"
+                    else:
+                        fileData += ",\""+coordDict['coord']+"\":{\"r\":"+str(coordDict['r'])+",\"g\":"+str(coordDict['g'])+",\"b\":"+str(coordDict['b'])+"}"
+                fileData+='}'
+                compressed = base64.b64encode(zlib.compress(bytes(json.dumps(fileData), "utf-8"))).decode("ascii")
+                r = s3.put_object(Body=compressed, Bucket='a3group69', Key='canvas')
+                return {'statusCode': 200}
+
+                
+        Handler: "index.lambda_handler"
+        Runtime: "python3.8"
+        Timeout: "5"
+        Role: !GetAtt LambdaFunctionRole.Arn      
+    ConnectPage:
+      Type: "AWS::Lambda::Function"
+      DeletionPolicy: Delete
+      Properties:
+        FunctionName: "ConnectPage"
+        Code:
+          ZipFile: |
+            import json
+            import boto3
+
+            dynamodb = boto3.client('dynamodb')
+
+            def lambda_handler(event, context):       
+                e = event["requestContext"]["connectionId"]
+                
+                item = {
+                    'id':{
+                        'S' : str(e)
+                    }
+                }
+                
+                
+                dynamodb.put_item(TableName='connectionsId', Item=item)
+                ip = event["requestContext"]["identity"]["sourceIp"]
+                ipItem = {
+                    'ip':{
+                        'S' : str(ip)
+                    },
+                    'time':{
+                        'N' : str(0)
+                    }
+                }
+                
+                dynamodb.put_item(TableName='timeoutIps', Item=ipItem)
+                
+                return {'statusCode': 200}
+
+        Handler: "index.lambda_handler"
+        Runtime: "python3.8"
+        Timeout: "5"
+        Role: !GetAtt LambdaFunctionRole.Arn  
+    DisconnectPage:
+      Type: "AWS::Lambda::Function"
+      DeletionPolicy: Delete
+      Properties:
+        FunctionName: "DisconnectPage"
+        Code:
+          ZipFile: |
+            import json
+            import boto3
+
+            dynamodb = boto3.resource('dynamodb')
+            def lambda_handler(event, context): 
+                e = event["requestContext"]["connectionId"]
+                table = dynamodb.Table('connectionsId')
+                
+                item = {
+                    'id':{
+                        'S' : str(e)
+                    }
+                }
+                
+                response = table.delete_item(Key={'id': str(e)} )
+                
+                return {'statusCode': 200}
+
+                
+        Handler: "index.lambda_handler"
+        Runtime: "python3.8"
+        Timeout: "5"
+        Role: !GetAtt LambdaFunctionRole.Arn
+    DynamoToS3Trigger:
+      Type: AWS::Lambda::EventSourceMapping
+      Properties:
+        BatchSize: 1
+        Enabled: True
+        EventSourceArn: !GetAtt "canvasData.StreamArn"
+        FunctionName: !GetAtt "DynamoToS3.Arn"
+        StartingPosition: LATEST
+        MaximumRetryAttempts: 50
+    LambdaConnectPermission:
+      Type: AWS::Lambda::Permission
+      Properties:
+        Action: lambda:InvokeFunction
+        FunctionName: !GetAtt ConnectPage.Arn
+        Principal: apigateway.amazonaws.com
+    LambdaDisconnectPermission:
+      Type: AWS::Lambda::Permission
+      Properties:
+        Action: lambda:InvokeFunction
+        FunctionName: !GetAtt DisconnectPage.Arn
+        Principal: apigateway.amazonaws.com
+    LambdaDrawPermission:
+      Type: AWS::Lambda::Permission
+      Properties:
+        Action: lambda:InvokeFunction
+        FunctionName: !GetAtt DrawPixel.Arn
+        Principal: apigateway.amazonaws.com

@@ -1,0 +1,8 @@
+#!/bin/bash
+
+# NOTE:
+# RUN THIS COMMAND FOR DEPLOYING BUT AFTER CONFIGURING THE AWS ACCESS KEYS
+# AFTER RUNNING THIS, YOU JUST NEED TO ACCESS THE ~/static_files/index.html AND UPDATE THE WSS URL AND USE THE
+# STATIC HTML PAGE TO INTERACT WITH THE APP
+
+aws cloudformation deploy --template-file awsCloudFormation.yaml --stack-name $1 --capabilities CAPABILITY_NAMED_IAM

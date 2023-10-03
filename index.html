@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en"> 
+	<head>
+		<link rel="stylesheet" type="text/css" href="style.css" media=”screen”/>
+		<meta charset="UTF-8" />
+                <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+                <meta http-equiv="Pragma" content="no-cache" />
+                <meta http-equiv="Expires" content="0" />
+
+		<title>r/place clone</title>
+
+		<script src="jquery-3.1.1.min.js"></script>
+		<script type="text/javascript" src="pako.min.js"></script>
+		<script type="text/javascript">
+
+			var socket;
+			var test;
+			$(function(){
+				// Change the URL here
+				socket = new WebSocket("wss://7pzkevkwrg.execute-api.us-east-1.amazonaws.com/LATEST")
+				socket.onopen = function (event) {
+					$('#sendButton').removeAttr('disabled');
+					console.log("connected");
+				};
+				socket.onclose = function (event) {
+					alert("closed code:" + event.code + " reason:" +event.reason + " wasClean:"+event.wasClean);
+				};
+				socket.onmessage = function (event) {
+					var o=JSON.parse(JSON.parse(event.data));
+					var context = document.getElementById('canvas').getContext('2d');
+					context.fillStyle = 'rgb('+o.r+','+o.g+','+o.b+')';
+		   			context.fillRect(o.x, o.y, 1, 1);
+				}
+
+				$('#setForm').submit(function( event ) {
+					var o = { 'x': $('#x').val(), 
+						'y': $('#y').val(), 
+						'r':$('#r').val(), 
+						'g':$('#g').val(), 
+						'b':$('#b').val()};
+
+					for(var key in o){
+						o[key]=parseInt(o[key]);
+					}
+					o['action'] = 'drawPixel'
+					socket.send(JSON.stringify(o));
+  					event.preventDefault();
+				});
+
+				// get initial canvas info
+				fetch("https://canvas-a3.s3.amazonaws.com/canvas").then(function(response) {
+					return response.text();
+				}).then(function(data) {
+					let compressedData = Uint8Array.from(atob(data), (c) => c.charCodeAt(0));
+					let decompressedData = pako.inflate(compressedData, { to: "string"});
+					let jsonObject = JSON.parse(JSON.parse(decompressedData));
+					for (const [key, value] of Object.entries(jsonObject)) {
+  						keyArray = key.split(',');
+						var context = document.getElementById('canvas').getContext('2d');
+						context.fillStyle = 'rgb('+value.r+','+value.g+','+value.b+')';
+		   				context.fillRect(keyArray[0], keyArray[1], 1, 1);
+					}
+				}).catch(function() {
+					console.log("Error: initial drawing of canvas failed, received incorrect data");
+				});
+			});
+		</script>
+		<style>
+                        body {
+                                text-align: center;
+                                align: center;
+                                overflow: hidden;
+                                margin: 0px;
+                                padding: 0px;
+                        }
+                        canvas {
+							width: 1000;;
+							height: 1000;		
+						border: 1px solid black;
+				}
+				input[type=number]{ width: 3em; }
+		</style>
+	</head>
+	<body>
+		<h1>r/place clone</h1>
+
+		<canvas id="canvas" width="1000" height="1000" ></canvas>
+		<form id="setForm">
+                        (<input type="number" id="x" placeholder="x" min="0" max="1000">,
+                        <input type="number" id="y" placeholder="y" min="0" max="1000">)
+                        &nbsp; &nbsp; &nbsp;
+                        (<input type="number" id="r" placeholder="r" min="0" max="255">,
+                        <input type="number"  id="g" placeholder="g" min="0" max="255">,
+                        <input type="number"  id="b" placeholder="b" min="0" max="255">)
+                        &nbsp; &nbsp; &nbsp;
+                        <input type="submit" name="set" value="set"/>
+                </form>
+	</body>
+</html>
+
